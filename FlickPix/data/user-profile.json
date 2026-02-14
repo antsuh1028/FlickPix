@@ -1,0 +1,78 @@
+{
+  "preferences": {
+    "favoriteGenres": [28, 878, 53],
+    "notes": "Action, Science Fiction, Thriller - derived from highly-rated watch history"
+  },
+  "watchHistory": [
+    {
+      "movieId": 157336,
+      "title": "Interstellar",
+      "rating": 9,
+      "watchedAt": "2024-01-15",
+      "genres": [12, 18, 878]
+    },
+    {
+      "movieId": 27205,
+      "title": "Inception",
+      "rating": 10,
+      "watchedAt": "2024-01-20",
+      "genres": [28, 878, 53]
+    },
+    {
+      "movieId": 155,
+      "title": "The Dark Knight",
+      "rating": 9,
+      "watchedAt": "2024-02-01",
+      "genres": [28, 80, 18]
+    },
+    {
+      "movieId": 680,
+      "title": "Pulp Fiction",
+      "rating": 8,
+      "watchedAt": "2024-02-10",
+      "genres": [53, 80]
+    },
+    {
+      "movieId": 424,
+      "title": "Schindler's List",
+      "rating": 9,
+      "watchedAt": "2024-02-15",
+      "genres": [18, 36, 10752]
+    },
+    {
+      "movieId": 13,
+      "title": "Forrest Gump",
+      "rating": 7,
+      "watchedAt": "2024-02-20",
+      "genres": [35, 18, 10749]
+    },
+    {
+      "movieId": 769,
+      "title": "GoodFellas",
+      "rating": 8,
+      "watchedAt": "2024-03-01",
+      "genres": [18, 80]
+    },
+    {
+      "movieId": 550,
+      "title": "Fight Club",
+      "rating": 10,
+      "watchedAt": "2024-03-05",
+      "genres": [18]
+    },
+    {
+      "movieId": 603,
+      "title": "The Matrix",
+      "rating": 9,
+      "watchedAt": "2024-03-10",
+      "genres": [28, 878]
+    },
+    {
+      "movieId": 122,
+      "title": "The Lord of the Rings: The Return of the King",
+      "rating": 8,
+      "watchedAt": "2024-03-15",
+      "genres": [12, 14, 28]
+    }
+  ]
+}
