@@ -1,16 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   TextInput,
   View,
-  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getRecommendations, type Recommendation } from '@/services/recommendations';
 
 const COLORS = {
   dark: {
@@ -40,8 +40,31 @@ const COLORS = {
 export default function HomeScreen() {
   const [movieInput, setMovieInput] = useState('');
   const [likedMovies, setLikedMovies] = useState<string[]>([]);
+  const [picks, setPicks] = useState<Recommendation[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const colorScheme = useColorScheme();
-  const theme = COLORS[ 'dark'];
+  const theme = COLORS[colorScheme ?? 'dark'];
+
+  const loadRecommendations = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const recs = await getRecommendations({ limit: 6 });
+      setPicks(recs);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Failed to load recommendations';
+      setError(message);
+      setPicks([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRecommendations();
+  }, []);
 
   const addMovie = () => {
     if (movieInput.trim() && !likedMovies.includes(movieInput.trim())) {
@@ -53,12 +76,6 @@ export default function HomeScreen() {
   const removeMovie = (index: number) => {
     setLikedMovies(likedMovies.filter((_, i) => i !== index));
   };
-
-  const picks = [
-    { title: 'Inception', year: '2010', reason: 'Mind-bending sci-fi thriller with layered storytelling' },
-    { title: 'The Dark Knight', year: '2008', reason: 'Gripping action with moral complexity' },
-    { title: 'Interstellar', year: '2014', reason: 'Emotional space odyssey about love and time' },
-  ];
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -165,42 +182,52 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.cardStack}>
-            {picks.map((movie, index) => (
-              <Pressable
-                key={movie.title}
-                style={({ pressed }) => [
-                  styles.card,
-                  {
-                    backgroundColor: theme.card,
-                    borderColor: theme.cardBorder,
-                    transform: [{ scale: pressed ? 0.98 : 1 }],
-                  },
-                ]}
-              >
-                <View style={styles.cardContent}>
-                  <View style={styles.cardMain}>
-                    <ThemedText style={[styles.cardTitle, { color: theme.text }]}>
-                      {movie.title}
-                    </ThemedText>
-                    <ThemedText style={[styles.cardYear, { color: theme.textMuted }]}>
-                      {movie.year}
+            {isLoading ? (
+              <View style={styles.loadingState}>
+                <ActivityIndicator size="small" color={theme.accent} />
+                <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>Loading picks...</ThemedText>
+              </View>
+            ) : picks.length > 0 ? (
+              picks.map((movie) => (
+                <Pressable
+                  key={movie.id}
+                  style={({ pressed }) => [
+                    styles.card,
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: theme.cardBorder,
+                      transform: [{ scale: pressed ? 0.98 : 1 }],
+                    },
+                  ]}
+                >
+                  <View style={styles.cardContent}>
+                    <View style={styles.cardMain}>
+                      <ThemedText style={[styles.cardTitle, { color: theme.text }]}>
+                        {movie.title}
+                      </ThemedText>
+                      <ThemedText style={[styles.cardYear, { color: theme.textMuted }]}> 
+                        {movie.releaseDate?.slice(0, 4) || '—'}
+                      </ThemedText>
+                    </View>
+                    <ThemedText
+                      style={[styles.cardReason, { color: theme.textMuted }]}
+                      numberOfLines={2}
+                    >
+                      {movie.reason}
                     </ThemedText>
                   </View>
-                  <ThemedText
-                    style={[styles.cardReason, { color: theme.textMuted }]}
-                    numberOfLines={2}
-                  >
-                    {movie.reason}
-                  </ThemedText>
-                </View>
-                <View style={[styles.cardAccent, { backgroundColor: theme.accent }]} />
-              </Pressable>
-            ))}
+                  <View style={[styles.cardAccent, { backgroundColor: theme.accent }]} />
+                </Pressable>
+              ))
+            ) : (
+              <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>No recommendations yet.</ThemedText>
+            )}
           </View>
         </View>
 
         {/* Action Button */}
         <Pressable
+          onPress={loadRecommendations}
           style={({ pressed }) => [
             styles.primaryButton,
             {
@@ -211,13 +238,13 @@ export default function HomeScreen() {
           ]}
         >
           <ThemedText style={styles.primaryButtonText}>
-            Get new recommendations
+            {isLoading ? 'Refreshing...' : 'Get new recommendations'}
           </ThemedText>
         </Pressable>
 
         {/* Footer hint */}
         <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>
-          Add more movies for better suggestions
+          {error ? error : 'Add more movies for better suggestions'}
         </ThemedText>
       </ScrollView>
     </View>
@@ -350,6 +377,11 @@ const styles = StyleSheet.create({
   },
   cardStack: {
     gap: 12,
+  },
+  loadingState: {
+    paddingVertical: 8,
+    alignItems: 'center',
+    gap: 8,
   },
   card: {
     borderRadius: 16,

@@ -7,8 +7,8 @@
  *   // Display recs in UI
  */
 
-import * as tmdb from "./tmdb.ts";
-import { getPreferences, getWatchedMovieIds, getRatings, getWatchHistory } from "./storage.ts";
+import * as tmdb from "./tmdb";
+import { getPreferences, getWatchedMovieIds, getRatings, getWatchHistory } from "./storage";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

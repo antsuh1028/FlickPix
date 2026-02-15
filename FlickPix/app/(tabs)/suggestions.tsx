@@ -1,19 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
   Dimensions,
-  FlatList,
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getRecommendations } from '@/services/recommendations';
+import { getGenres } from '@/services/tmdb';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 40;
 const POSTER_WIDTH = SCREEN_WIDTH * 0.28;
 const POSTER_HEIGHT = POSTER_WIDTH * 1.5;
 
@@ -47,50 +48,6 @@ const COLORS = {
     posterBg: 'rgba(0, 0, 0, 0.06)',
   },
 };
-
-// Placeholder data
-const SUGGESTIONS = [
-  {
-    id: 27205,
-    title: 'Inception',
-    year: '2010',
-    rating: 8.4,
-    matchScore: 95,
-    poster: null,
-    reason: 'Because you loved The Dark Knight and Interstellar',
-    genres: ['Sci-Fi', 'Action', 'Thriller'],
-  },
-  {
-    id: 155,
-    title: 'The Prestige',
-    year: '2006',
-    rating: 8.5,
-    matchScore: 92,
-    poster: null,
-    reason: 'Fans of mind-bending thrillers love this',
-    genres: ['Drama', 'Mystery', 'Thriller'],
-  },
-  {
-    id: 550,
-    title: 'Fight Club',
-    year: '1999',
-    rating: 8.4,
-    matchScore: 89,
-    poster: null,
-    reason: 'Based on your interest in psychological dramas',
-    genres: ['Drama', 'Thriller'],
-  },
-  {
-    id: 680,
-    title: 'Pulp Fiction',
-    year: '1994',
-    rating: 8.9,
-    matchScore: 87,
-    poster: null,
-    reason: 'A classic that matches your taste',
-    genres: ['Crime', 'Drama'],
-  },
-];
 
 const GENRES = [
   { id: 1, name: 'All', active: true },
@@ -199,8 +156,77 @@ function SuggestionCard({ movie, theme, onPress }: { movie: Movie; theme: typeof
 
 export default function SuggestionsScreen() {
   const [activeGenre, setActiveGenre] = useState(1);
+  const [suggestions, setSuggestions] = useState<Movie[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
+
+  const loadSuggestions = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const [recommendations, genres] = await Promise.all([
+        getRecommendations({ limit: 12 }),
+        getGenres(),
+      ]);
+
+      const genreMap = new Map(genres.map((genre) => [genre.id, genre.name]));
+
+      const mapped = recommendations.map((recommendation) => {
+        const matchScore = Math.max(70, Math.min(99, Math.round(recommendation.voteAverage * 10)));
+
+        return {
+          id: recommendation.id,
+          title: recommendation.title,
+          year: recommendation.releaseDate?.slice(0, 4) || '—',
+          rating: Number(recommendation.voteAverage.toFixed(1)),
+          matchScore,
+          poster: recommendation.posterPath,
+          reason: recommendation.reason,
+          genres: recommendation.genreIds
+            .map((id) => genreMap.get(id))
+            .filter((name): name is string => !!name),
+        };
+      });
+
+      setSuggestions(mapped);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Failed to load suggestions';
+      setError(message);
+      setSuggestions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSuggestions();
+  }, []);
+
+  const filteredSuggestions = useMemo(() => {
+    if (activeGenre === 1) {
+      return suggestions;
+    }
+
+    const selectedGenre = GENRES.find((genre) => genre.id === activeGenre)?.name;
+    if (!selectedGenre) {
+      return suggestions;
+    }
+
+    return suggestions.filter((movie) => movie.genres.includes(selectedGenre));
+  }, [activeGenre, suggestions]);
+
+  const averageMatch = useMemo(() => {
+    if (suggestions.length === 0) return 0;
+    const total = suggestions.reduce((sum, movie) => sum + movie.matchScore, 0);
+    return Math.round(total / suggestions.length);
+  }, [suggestions]);
+
+  const uniqueGenresCount = useMemo(() => {
+    return new Set(suggestions.flatMap((movie) => movie.genres)).size;
+  }, [suggestions]);
 
   const handleMoviePress = (movie: Movie) => {
     console.log('Selected:', movie.title);
@@ -236,15 +262,15 @@ export default function SuggestionsScreen() {
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statNumber, { color: theme.accent }]}>24</ThemedText>
+            <ThemedText style={[styles.statNumber, { color: theme.accent }]}>{suggestions.length}</ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Movies rated</ThemedText>
           </View>
           <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statNumber, { color: theme.green }]}>89%</ThemedText>
+            <ThemedText style={[styles.statNumber, { color: theme.green }]}>{averageMatch}%</ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Avg match</ThemedText>
           </View>
           <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statNumber, { color: theme.text }]}>5</ThemedText>
+            <ThemedText style={[styles.statNumber, { color: theme.text }]}>{uniqueGenresCount}</ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Top genres</ThemedText>
           </View>
         </View>
@@ -285,21 +311,36 @@ export default function SuggestionsScreen() {
             <ThemedText style={[styles.sectionTitle, { color: theme.text }]}>
               Top Picks
             </ThemedText>
-            <Pressable>
+            <Pressable onPress={loadSuggestions}>
               <ThemedText style={[styles.refreshText, { color: theme.accent }]}>
                 Refresh
               </ThemedText>
             </Pressable>
           </View>
 
-          {SUGGESTIONS.map((movie) => (
-            <SuggestionCard
-              key={movie.id}
-              movie={movie}
-              theme={theme}
-              onPress={() => handleMoviePress(movie)}
-            />
-          ))}
+          {isLoading ? (
+            <View style={styles.stateContainer}>
+              <ActivityIndicator size="small" color={theme.accent} />
+              <ThemedText style={[styles.stateText, { color: theme.textMuted }]}>Loading recommendations...</ThemedText>
+            </View>
+          ) : error ? (
+            <View style={styles.stateContainer}>
+              <ThemedText style={[styles.stateText, { color: theme.textMuted }]}>{error}</ThemedText>
+            </View>
+          ) : filteredSuggestions.length === 0 ? (
+            <View style={styles.stateContainer}>
+              <ThemedText style={[styles.stateText, { color: theme.textMuted }]}>No matches for this genre yet.</ThemedText>
+            </View>
+          ) : (
+            filteredSuggestions.map((movie) => (
+              <SuggestionCard
+                key={movie.id}
+                movie={movie}
+                theme={theme}
+                onPress={() => handleMoviePress(movie)}
+              />
+            ))
+          )}
         </View>
 
         {/* More suggestions prompt */}
@@ -402,6 +443,15 @@ const styles = StyleSheet.create({
   refreshText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  stateContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  stateText: {
+    fontSize: 14,
   },
   suggestionCard: {
     flexDirection: 'row',
