@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getRecommendations, type Recommendation } from '@/services/recommendations';
+import { getAvailableUsers, getActiveUserId, setActiveUser } from '@/services/storage';
 
 const COLORS = {
   dark: {
@@ -43,10 +45,15 @@ export default function HomeScreen() {
   const [picks, setPicks] = useState<Recommendation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [activeUser, setActiveUserState] = useState(getActiveUserId());
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
 
-  const loadRecommendations = async () => {
+  const users = getAvailableUsers();
+  const activeUserName = users.find((u) => u.id === activeUser)?.name ?? 'User';
+
+  const loadRecommendations = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -60,11 +67,18 @@ export default function HomeScreen() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadRecommendations();
-  }, []);
+  }, [loadRecommendations]);
+
+  const switchUser = (userId: string) => {
+    setActiveUser(userId);
+    setActiveUserState(userId);
+    setShowUserMenu(false);
+    loadRecommendations();
+  };
 
   const addMovie = () => {
     if (movieInput.trim() && !likedMovies.includes(movieInput.trim())) {
@@ -99,16 +113,78 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.logoRow}>
-            <View style={[styles.logoDot, { backgroundColor: theme.accent }]} />
-            <ThemedText style={[styles.logoText, { color: theme.text }]}>
-              FlickPix
-            </ThemedText>
+          <View style={styles.headerTopRow}>
+            <View style={styles.logoRow}>
+              <View style={[styles.logoDot, { backgroundColor: theme.accent }]} />
+              <ThemedText style={[styles.logoText, { color: theme.text }]}>
+                FlickPix
+              </ThemedText>
+            </View>
+            <Pressable
+              onPress={() => setShowUserMenu(true)}
+              style={({ pressed }) => [
+                styles.userButton,
+                {
+                  backgroundColor: theme.accentSoft,
+                  borderColor: theme.cardBorder,
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}
+            >
+              <ThemedText style={[styles.userButtonText, { color: theme.accent }]}>
+                {activeUserName} ▾
+              </ThemedText>
+            </Pressable>
           </View>
           <ThemedText style={[styles.tagline, { color: theme.textMuted }]}>
             Discover your next favorite film
           </ThemedText>
         </View>
+
+        {/* User Switcher Modal */}
+        <Modal
+          visible={showUserMenu}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowUserMenu(false)}
+        >
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => setShowUserMenu(false)}
+          >
+            <View style={[styles.modalContent, { backgroundColor: theme.bg, borderColor: theme.cardBorder }]}>
+              <ThemedText style={[styles.modalTitle, { color: theme.text }]}>
+                Switch User
+              </ThemedText>
+              {users.map((user) => (
+                <Pressable
+                  key={user.id}
+                  onPress={() => switchUser(user.id)}
+                  style={({ pressed }) => [
+                    styles.modalOption,
+                    {
+                      backgroundColor: user.id === activeUser ? theme.accentSoft : 'transparent',
+                      borderColor: theme.cardBorder,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    style={[
+                      styles.modalOptionText,
+                      { color: user.id === activeUser ? theme.accent : theme.text },
+                    ]}
+                  >
+                    {user.name}
+                  </ThemedText>
+                  {user.id === activeUser && (
+                    <ThemedText style={{ color: theme.accent, fontSize: 16 }}>✓</ThemedText>
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          </Pressable>
+        </Modal>
 
         {/* Input Section */}
         <View style={styles.section}>
@@ -282,10 +358,57 @@ const styles = StyleSheet.create({
   header: {
     gap: 8,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  userButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  userButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: 280,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  modalOptionText: {
+    fontSize: 16,
+    fontWeight: '500',
   },
   logoDot: {
     width: 10,

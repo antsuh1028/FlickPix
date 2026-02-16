@@ -11,7 +11,7 @@
     "lint": "expo lint",
     "test:tmdb": "node ./scripts/test-tmdb.mjs",
     "fetch-poster": "node ./scripts/fetch-poster.mjs",
-    "test:recs": "node ./scripts/test-recommendations.mjs"
+    "test:recs": "node --experimental-transform-types ./scripts/test-recommendations.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

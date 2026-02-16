@@ -35,16 +35,15 @@ tmdbModule.setApiKey(API_KEY);
 
 // Import recommendation service
 const { getRecommendations, getPosterUrl } = await import("../services/recommendations.ts");
-const { getUserProfile } = await import("../services/storage.ts");
+const { getUserProfile, getAvailableUsers, setActiveUser } = await import("../services/storage.ts");
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
-async function main() {
-  console.log("🎬  FlickPix Recommendation Test\n");
+async function testUser(userId, userName) {
+  setActiveUser(userId);
 
-  // Show user profile
   console.log("═".repeat(60));
-  console.log("  USER PROFILE");
+  console.log(`  USER: ${userName} (${userId})`);
   console.log("═".repeat(60));
 
   const profile = await getUserProfile();
@@ -64,10 +63,9 @@ async function main() {
     console.log(`    ... and ${profile.watchHistory.length - 5} more`);
   }
 
-  // Get recommendations
-  console.log("\n" + "═".repeat(60));
-  console.log("  GENERATING RECOMMENDATIONS...");
-  console.log("═".repeat(60));
+  console.log("\n" + "─".repeat(60));
+  console.log("  RECOMMENDATIONS:");
+  console.log("─".repeat(60));
 
   const startTime = Date.now();
   const recs = await getRecommendations({ limit: 10 });
@@ -75,7 +73,6 @@ async function main() {
 
   console.log(`  Found ${recs.length} recommendations in ${elapsed}ms\n`);
 
-  // Display each recommendation
   for (let i = 0; i < recs.length; i++) {
     const rec = recs[i];
     const year = rec.releaseDate?.slice(0, 4) || "????";
@@ -84,45 +81,26 @@ async function main() {
     console.log(`${(i + 1).toString().padStart(2)}. ${rec.title} (${year})`);
     console.log(`    ★ ${rec.voteAverage.toFixed(1)}  |  ${genreNames}`);
     console.log(`    Why: ${rec.reason}`);
-    console.log(`    Poster: ${getPosterUrl(rec.posterPath)}`);
-    console.log(`    Overview: ${rec.overview.slice(0, 100)}...`);
+    console.log();
+  }
+}
+
+async function main() {
+  console.log("🎬  FlickPix Multi-User Recommendation Test\n");
+
+  const users = getAvailableUsers();
+  console.log(`  Available users: ${users.map((u) => u.name).join(", ")}\n`);
+
+  for (const user of users) {
+    await testUser(user.id, user.name);
     console.log();
   }
 
   console.log("═".repeat(60));
-  console.log("  FRONTEND INTEGRATION");
+  console.log("  DONE — Both users tested!");
   console.log("═".repeat(60));
-  console.log(`
-  In your React component:
-
-  import { getRecommendations, getPosterUrl } from '@/services/recommendations';
-
-  const MyComponent = () => {
-    const [recs, setRecs] = useState([]);
-
-    useEffect(() => {
-      async function load() {
-        const results = await getRecommendations({ limit: 10 });
-        setRecs(results);
-      }
-      load();
-    }, []);
-
-    return (
-      <View>
-        {recs.map(rec => (
-          <View key={rec.id}>
-            <Image source={{ uri: getPosterUrl(rec.posterPath) }} />
-            <Text>{rec.title}</Text>
-            <Text>{rec.reason}</Text>
-          </View>
-        ))}
-      </View>
-    );
-  };
-  `);
-
-  console.log("\n✅  Done! Recommendations are ready for the UI.\n");
+  console.log("  Default user → Action/Sci-Fi/Thriller recommendations");
+  console.log("  Sarah         → Romance/Comedy/Drama recommendations\n");
 }
 
 main().catch((err) => {
