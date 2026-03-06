@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -8,9 +8,18 @@ import {
   Image,
   Switch,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import {
+  getUserProfile,
+  getAvailableUsers,
+  getActiveUserId,
+  clearCache,
+  type UserProfile,
+  type WatchedMovie,
+} from '@/services/storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const MINI_POSTER_SIZE = 60;
@@ -48,20 +57,32 @@ const COLORS = {
   },
 };
 
-const RECENT_RATINGS = [
-  { id: 550, title: 'Fight Club', rating: 9, poster: null },
-  { id: 155, title: 'The Dark Knight', rating: 10, poster: null },
-  { id: 680, title: 'Pulp Fiction', rating: 8, poster: null },
-  { id: 13, title: 'Forrest Gump', rating: 9, poster: null },
-  { id: 238, title: 'The Godfather', rating: 10, poster: null },
-];
+const GENRE_NAMES: Record<number, string> = {
+  28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy',
+  80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family',
+  14: 'Fantasy', 36: 'History', 27: 'Horror', 10402: 'Music',
+  9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 10770: 'TV Movie',
+  53: 'Thriller', 10752: 'War', 37: 'Western',
+};
 
-const FAVORITE_GENRES = [
-  { name: 'Sci-Fi', count: 12, color: '#8B5CF6' },
-  { name: 'Thriller', count: 9, color: '#EC4899' },
-  { name: 'Drama', count: 8, color: '#3B82F6' },
-  { name: 'Action', count: 6, color: '#F59E0B' },
-];
+const GENRE_COLORS = ['#8B5CF6', '#EC4899', '#3B82F6', '#F59E0B', '#10B981', '#EF4444'];
+
+function deriveTopGenres(watchHistory: WatchedMovie[]) {
+  const counts: Record<number, number> = {};
+  for (const movie of watchHistory) {
+    for (const gid of movie.genres) {
+      counts[gid] = (counts[gid] || 0) + 1;
+    }
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([id, count], i) => ({
+      name: GENRE_NAMES[Number(id)] || `#${id}`,
+      count,
+      color: GENRE_COLORS[i % GENRE_COLORS.length],
+    }));
+}
 
 const WATCHLIST = [
   { id: 27205, title: 'Inception', year: '2010', poster: null },
@@ -71,8 +92,29 @@ const WATCHLIST = [
 
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
+
+  useFocusEffect(
+    useCallback(() => {
+      clearCache();
+      getUserProfile().then(setProfile);
+    }, [])
+  );
+
+  const watchHistory = profile?.watchHistory ?? [];
+  const watchedCount = watchHistory.length;
+  const avgRating = watchedCount > 0
+    ? (watchHistory.reduce((sum, m) => sum + m.rating, 0) / watchedCount).toFixed(1)
+    : '—';
+  const topGenres = deriveTopGenres(watchHistory);
+  const maxGenreCount = topGenres.length > 0 ? topGenres[0].count : 1;
+  const recentRatings = [...watchHistory].reverse().slice(0, 5);
+
+  const activeUserName = getAvailableUsers().find(
+    (u) => u.id === getActiveUserId()
+  )?.name ?? 'User';
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -94,7 +136,7 @@ export default function ProfileScreen() {
             <ThemedText style={styles.avatarEmoji}>🎬</ThemedText>
           </View>
           <ThemedText style={[styles.username, { color: theme.text }]}>
-            Movie Buff
+            {activeUserName}
           </ThemedText>
           <ThemedText style={[styles.memberSince, { color: theme.textMuted }]}>
             Member since January 2024
@@ -110,11 +152,11 @@ export default function ProfileScreen() {
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
           <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statValue, { color: theme.accent }]}>47</ThemedText>
+            <ThemedText style={[styles.statValue, { color: theme.accent }]}>{watchedCount}</ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Watched</ThemedText>
           </View>
           <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statValue, { color: theme.green }]}>8.2</ThemedText>
+            <ThemedText style={[styles.statValue, { color: theme.green }]}>{avgRating}</ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Avg Rating</ThemedText>
           </View>
           <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
@@ -133,7 +175,7 @@ export default function ProfileScreen() {
             Top Genres
           </ThemedText>
           <View style={[styles.genresCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            {FAVORITE_GENRES.map((genre, index) => (
+            {topGenres.map((genre) => (
               <View key={genre.name} style={styles.genreRow}>
                 <View style={styles.genreInfo}>
                   <View style={[styles.genreDot, { backgroundColor: genre.color }]} />
@@ -147,7 +189,7 @@ export default function ProfileScreen() {
                       styles.genreBar, 
                       { 
                         backgroundColor: genre.color,
-                        width: `${(genre.count / 12) * 100}%`,
+                        width: `${(genre.count / maxGenreCount) * 100}%`,
                       }
                     ]} 
                   />
@@ -178,9 +220,9 @@ export default function ProfileScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.ratingsScroll}
           >
-            {RECENT_RATINGS.map((movie) => (
+            {recentRatings.map((movie) => (
               <Pressable 
-                key={movie.id}
+                key={movie.movieId}
                 style={({ pressed }) => [
                   styles.ratingCard,
                   { 

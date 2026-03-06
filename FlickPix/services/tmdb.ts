@@ -64,14 +64,27 @@ export interface Credits {
 }
 
 export interface DiscoverOptions {
-  with_genres?: string;       // comma-separated genre IDs
-  sort_by?: string;           // e.g. "popularity.desc", "vote_average.desc"
+  with_genres?: string;
+  without_genres?: string;
+  sort_by?: string;
   primary_release_year?: number;
+  "primary_release_date.gte"?: string;    // YYYY-MM-DD
+  "primary_release_date.lte"?: string;    // YYYY-MM-DD
   "vote_average.gte"?: number;
   "vote_average.lte"?: number;
   "vote_count.gte"?: number;
-  with_runtime_gte?: number;  // minutes
-  with_runtime_lte?: number;  // minutes
+  with_runtime_gte?: number;
+  with_runtime_lte?: number;
+  with_original_language?: string;        // ISO 639-1 (e.g. "ja", "ko")
+  with_origin_country?: string;           // pipe-separated ISO 3166-1 (e.g. "JP|KR")
+  with_keywords?: string;                 // comma-separated keyword IDs
+  without_keywords?: string;
+  certification?: string;                 // e.g. "R", "PG-13"
+  certification_country?: string;         // ISO 3166-1 (e.g. "US")
+  "certification.gte"?: string;
+  "certification.lte"?: string;
+  with_cast?: string;                     // comma-separated person IDs
+  with_crew?: string;
   page?: number;
 }
 

@@ -8,6 +8,7 @@ import 'react-native-reanimated';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { setApiKey } from '@/services/tmdb';
+import { setOpenAIKey } from '@/services/moodSearch';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -36,10 +37,14 @@ export default function RootLayout() {
 
     if (apiKey) {
       setApiKey(apiKey);
-      return;
+    } else {
+      console.warn('TMDB API key is missing. Set EXPO_PUBLIC_TMDB_API_KEY in your .env file.');
     }
 
-    console.warn('TMDB API key is missing. Set EXPO_PUBLIC_TMDB_API_KEY in your .env file.');
+    const openaiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+    if (openaiKey) {
+      setOpenAIKey(openaiKey);
+    }
   }, []);
 
   return (

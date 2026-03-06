@@ -29,6 +29,7 @@ export interface RecommendationOptions {
   limit?: number;           // How many to return (default: 10)
   minRating?: number;       // Minimum TMDB vote_average (default: 6.5)
   minVoteCount?: number;    // Minimum vote count for quality (default: 100)
+  page?: number;            // TMDB discover page (default: 1)
 }
 
 // ── Recommendation Engine ──────────────────────────────────────────────────
@@ -51,6 +52,7 @@ export async function getRecommendations(
     limit = 10,
     minRating = 6.5,
     minVoteCount = 100,
+    page = 1,
   } = options;
 
   // Load user data
@@ -84,26 +86,16 @@ export async function getRecommendations(
     return await getPopularFallback(watchedIds, limit);
   }
 
-  // Get candidates from TMDB discover
   const genreStr = topGenres.join(",");
   const response = await tmdb.discoverMovies({
     with_genres: genreStr,
     sort_by: "vote_average.desc",
     "vote_average.gte": minRating,
     "vote_count.gte": minVoteCount,
-    page: 1,
+    page,
   });
 
-  // Also get page 2 for more variety
-  const response2 = await tmdb.discoverMovies({
-    with_genres: genreStr,
-    sort_by: "popularity.desc",
-    "vote_average.gte": minRating,
-    "vote_count.gte": minVoteCount,
-    page: 2,
-  });
-
-  const allCandidates = [...response.results, ...response2.results];
+  const allCandidates = response.results;
 
   // Filter out watched
   const unwatched = allCandidates.filter((m) => !watchedIds.includes(m.id));

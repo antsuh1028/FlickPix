@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -11,7 +12,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getRecommendations, type Recommendation } from '@/services/recommendations';
+import { getRecommendations, getPosterUrl, type Recommendation } from '@/services/recommendations';
+import { getMoodRecommendations, getMoodPage, type MoodSearchResult } from '@/services/moodSearch';
 import { getAvailableUsers, getActiveUserId, setActiveUser } from '@/services/storage';
 
 const COLORS = {
@@ -46,6 +48,14 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [moodInput, setMoodInput] = useState('');
+  const [moodLoading, setMoodLoading] = useState(false);
+  const [moodExplanation, setMoodExplanation] = useState<string | null>(null);
+  const [moodResults, setMoodResults] = useState<Recommendation[] | null>(null);
+  const [moodError, setMoodError] = useState<string | null>(null);
+  const [moodFilters, setMoodFilters] = useState<MoodSearchResult['filters'] | null>(null);
+  const [moodPage, setMoodPage] = useState(1);
+  const [forYouPage, setForYouPage] = useState(1);
   const [activeUser, setActiveUserState] = useState(getActiveUserId());
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
@@ -53,13 +63,13 @@ export default function HomeScreen() {
   const users = getAvailableUsers();
   const activeUserName = users.find((u) => u.id === activeUser)?.name ?? 'User';
 
-  const loadRecommendations = useCallback(async () => {
+  const loadRecommendations = useCallback(async (page = 1) => {
     setIsLoading(true);
     setError(null);
-
     try {
-      const recs = await getRecommendations({ limit: 6 });
+      const recs = await getRecommendations({ limit: 10, page });
       setPicks(recs);
+      setForYouPage(page);
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Failed to load recommendations';
       setError(message);
@@ -70,14 +80,65 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    loadRecommendations();
+    loadRecommendations(1);
   }, [loadRecommendations]);
 
   const switchUser = (userId: string) => {
     setActiveUser(userId);
     setActiveUserState(userId);
     setShowUserMenu(false);
-    loadRecommendations();
+    loadRecommendations(1);
+  };
+
+  const searchByMood = useCallback(async () => {
+    if (!moodInput.trim()) return;
+    setMoodLoading(true);
+    setMoodExplanation(null);
+    setMoodResults(null);
+    setMoodError(null);
+    setMoodFilters(null);
+    try {
+      const { recommendations, moodExplanation: explanation, filters } =
+        await getMoodRecommendations(moodInput.trim(), 10);
+      setMoodResults(recommendations);
+      setMoodExplanation(explanation);
+      setMoodFilters(filters);
+      setMoodPage(1);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Mood search failed';
+      if (msg.includes('insufficient_quota') || msg.includes('429')) {
+        setMoodError('OpenAI API quota exceeded — add billing credits at platform.openai.com');
+      } else {
+        setMoodError(msg);
+      }
+    } finally {
+      setMoodLoading(false);
+    }
+  }, [moodInput]);
+
+  const loadMoodPage = useCallback(async (page: number) => {
+    if (!moodFilters || !moodExplanation) return;
+    setMoodLoading(true);
+    setMoodError(null);
+    try {
+      const recs = await getMoodPage(moodFilters, moodExplanation, page, 10);
+      setMoodResults(recs);
+      setMoodPage(page);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load page';
+      setMoodError(msg);
+    } finally {
+      setMoodLoading(false);
+    }
+  }, [moodFilters, moodExplanation]);
+
+  const clearMoodResults = () => {
+    setMoodResults(null);
+    setMoodExplanation(null);
+    setMoodError(null);
+    setMoodFilters(null);
+    setMoodInput('');
+    setMoodPage(1);
   };
 
   const addMovie = () => {
@@ -244,6 +305,164 @@ export default function HomeScreen() {
           )}
         </View>
 
+        {/* Mood Search */}
+        <View style={styles.section}>
+          <ThemedText style={[styles.sectionLabel, { color: theme.textMuted }]}>
+            WHAT ARE YOU IN THE MOOD FOR?
+          </ThemedText>
+          <View
+            style={[
+              styles.inputContainer,
+              { backgroundColor: theme.inputBg, borderColor: theme.cardBorder },
+            ]}
+          >
+            <TextInput
+              style={[styles.input, { color: theme.text }]}
+              placeholder="e.g. something cozy and heartwarming..."
+              placeholderTextColor={theme.textMuted}
+              value={moodInput}
+              onChangeText={setMoodInput}
+              onSubmitEditing={searchByMood}
+              returnKeyType="search"
+            />
+            <Pressable
+              style={({ pressed }) => [
+                styles.addButton,
+                {
+                  backgroundColor: moodLoading ? theme.textMuted : theme.accent,
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}
+              onPress={searchByMood}
+              disabled={moodLoading}
+            >
+              {moodLoading ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <ThemedText style={styles.addButtonText}>→</ThemedText>
+              )}
+            </Pressable>
+          </View>
+
+          {moodExplanation && (
+            <View style={[styles.moodExplanation, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+              <ThemedText style={[styles.moodExplanationText, { color: theme.accent }]}>
+                {moodExplanation}
+              </ThemedText>
+              <Pressable onPress={clearMoodResults}>
+                <ThemedText style={[styles.chipX, { color: theme.accent }]}>×</ThemedText>
+              </Pressable>
+            </View>
+          )}
+
+          {moodResults && moodResults.length > 0 && (
+            <>
+              <View style={styles.posterGrid}>
+                {moodResults.map((movie) => {
+                  const posterUri = getPosterUrl(movie.posterPath, 'w342');
+                  return (
+                    <Pressable
+                      key={movie.id}
+                      style={({ pressed }) => [
+                        styles.posterCard,
+                        {
+                          backgroundColor: theme.card,
+                          borderColor: theme.cardBorder,
+                          opacity: pressed ? 0.85 : 1,
+                          transform: [{ scale: pressed ? 0.97 : 1 }],
+                        },
+                      ]}
+                    >
+                      {posterUri ? (
+                        <Image source={{ uri: posterUri }} style={styles.posterImage} />
+                      ) : (
+                        <View style={[styles.posterImage, styles.posterPlaceholder, { backgroundColor: theme.inputBg }]}>
+                          <ThemedText style={[styles.posterPlaceholderText, { color: theme.textMuted }]}>
+                            No Poster
+                          </ThemedText>
+                        </View>
+                      )}
+                      <View style={styles.posterInfo}>
+                        <ThemedText style={[styles.posterTitle, { color: theme.text }]} numberOfLines={2}>
+                          {movie.title}
+                        </ThemedText>
+                        <View style={styles.posterMeta}>
+                          <ThemedText style={[styles.posterYear, { color: theme.textMuted }]}>
+                            {movie.releaseDate?.slice(0, 4) || '—'}
+                          </ThemedText>
+                          <View style={[styles.ratingBadge, { backgroundColor: theme.accentSoft }]}>
+                            <ThemedText style={[styles.ratingText, { color: theme.accent }]}>
+                              {movie.voteAverage.toFixed(1)}
+                            </ThemedText>
+                          </View>
+                        </View>
+                        <ThemedText
+                          style={[styles.posterReason, { color: theme.textMuted }]}
+                          numberOfLines={2}
+                        >
+                          {movie.reason}
+                        </ThemedText>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.pager}>
+                <Pressable
+                  onPress={() => loadMoodPage(moodPage - 1)}
+                  disabled={moodPage <= 1 || moodLoading}
+                  style={({ pressed }) => [
+                    styles.pagerButton,
+                    {
+                      backgroundColor: moodPage <= 1 ? theme.inputBg : theme.accentSoft,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <ThemedText style={[styles.pagerButtonText, { color: moodPage <= 1 ? theme.textMuted : theme.accent }]}>
+                    Prev
+                  </ThemedText>
+                </Pressable>
+                <ThemedText style={[styles.pagerInfo, { color: theme.textMuted }]}>
+                  Page {moodPage}
+                </ThemedText>
+                <Pressable
+                  onPress={() => loadMoodPage(moodPage + 1)}
+                  disabled={moodLoading}
+                  style={({ pressed }) => [
+                    styles.pagerButton,
+                    {
+                      backgroundColor: theme.accentSoft,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <ThemedText style={[styles.pagerButtonText, { color: theme.accent }]}>
+                    Next
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {moodResults && moodResults.length === 0 && !moodError && (
+            <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>
+              No matches found — try describing your mood differently.
+            </ThemedText>
+          )}
+
+          {moodError && (
+            <View style={[styles.moodExplanation, { backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.3)' }]}>
+              <ThemedText style={[styles.moodExplanationText, { color: '#EF4444', fontStyle: 'normal' }]}>
+                {moodError}
+              </ThemedText>
+              <Pressable onPress={clearMoodResults}>
+                <ThemedText style={[styles.chipX, { color: '#EF4444' }]}>×</ThemedText>
+              </Pressable>
+            </View>
+          )}
+        </View>
+
         {/* Recommendations */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -257,70 +476,107 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <View style={styles.cardStack}>
-            {isLoading ? (
-              <View style={styles.loadingState}>
-                <ActivityIndicator size="small" color={theme.accent} />
-                <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>Loading picks...</ThemedText>
+          {isLoading ? (
+            <View style={styles.loadingState}>
+              <ActivityIndicator size="small" color={theme.accent} />
+              <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>Loading picks...</ThemedText>
+            </View>
+          ) : picks.length > 0 ? (
+            <>
+              <View style={styles.posterGrid}>
+                {picks.map((movie) => {
+                  const posterUri = getPosterUrl(movie.posterPath, 'w342');
+                  return (
+                    <Pressable
+                      key={movie.id}
+                      style={({ pressed }) => [
+                        styles.posterCard,
+                        {
+                          backgroundColor: theme.card,
+                          borderColor: theme.cardBorder,
+                          opacity: pressed ? 0.85 : 1,
+                          transform: [{ scale: pressed ? 0.97 : 1 }],
+                        },
+                      ]}
+                    >
+                      {posterUri ? (
+                        <Image source={{ uri: posterUri }} style={styles.posterImage} />
+                      ) : (
+                        <View style={[styles.posterImage, styles.posterPlaceholder, { backgroundColor: theme.inputBg }]}>
+                          <ThemedText style={[styles.posterPlaceholderText, { color: theme.textMuted }]}>
+                            No Poster
+                          </ThemedText>
+                        </View>
+                      )}
+                      <View style={styles.posterInfo}>
+                        <ThemedText style={[styles.posterTitle, { color: theme.text }]} numberOfLines={2}>
+                          {movie.title}
+                        </ThemedText>
+                        <View style={styles.posterMeta}>
+                          <ThemedText style={[styles.posterYear, { color: theme.textMuted }]}>
+                            {movie.releaseDate?.slice(0, 4) || '—'}
+                          </ThemedText>
+                          <View style={[styles.ratingBadge, { backgroundColor: theme.accentSoft }]}>
+                            <ThemedText style={[styles.ratingText, { color: theme.accent }]}>
+                              {movie.voteAverage.toFixed(1)}
+                            </ThemedText>
+                          </View>
+                        </View>
+                        <ThemedText
+                          style={[styles.posterReason, { color: theme.textMuted }]}
+                          numberOfLines={2}
+                        >
+                          {movie.reason}
+                        </ThemedText>
+                      </View>
+                    </Pressable>
+                  );
+                })}
               </View>
-            ) : picks.length > 0 ? (
-              picks.map((movie) => (
+              <View style={styles.pager}>
                 <Pressable
-                  key={movie.id}
+                  onPress={() => loadRecommendations(forYouPage - 1)}
+                  disabled={forYouPage <= 1 || isLoading}
                   style={({ pressed }) => [
-                    styles.card,
+                    styles.pagerButton,
                     {
-                      backgroundColor: theme.card,
-                      borderColor: theme.cardBorder,
-                      transform: [{ scale: pressed ? 0.98 : 1 }],
+                      backgroundColor: forYouPage <= 1 ? theme.inputBg : theme.accentSoft,
+                      opacity: pressed ? 0.7 : 1,
                     },
                   ]}
                 >
-                  <View style={styles.cardContent}>
-                    <View style={styles.cardMain}>
-                      <ThemedText style={[styles.cardTitle, { color: theme.text }]}>
-                        {movie.title}
-                      </ThemedText>
-                      <ThemedText style={[styles.cardYear, { color: theme.textMuted }]}> 
-                        {movie.releaseDate?.slice(0, 4) || '—'}
-                      </ThemedText>
-                    </View>
-                    <ThemedText
-                      style={[styles.cardReason, { color: theme.textMuted }]}
-                      numberOfLines={2}
-                    >
-                      {movie.reason}
-                    </ThemedText>
-                  </View>
-                  <View style={[styles.cardAccent, { backgroundColor: theme.accent }]} />
+                  <ThemedText style={[styles.pagerButtonText, { color: forYouPage <= 1 ? theme.textMuted : theme.accent }]}>
+                    Prev
+                  </ThemedText>
                 </Pressable>
-              ))
-            ) : (
-              <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>No recommendations yet.</ThemedText>
-            )}
-          </View>
+                <ThemedText style={[styles.pagerInfo, { color: theme.textMuted }]}>
+                  Page {forYouPage}
+                </ThemedText>
+                <Pressable
+                  onPress={() => loadRecommendations(forYouPage + 1)}
+                  disabled={isLoading}
+                  style={({ pressed }) => [
+                    styles.pagerButton,
+                    {
+                      backgroundColor: theme.accentSoft,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <ThemedText style={[styles.pagerButtonText, { color: theme.accent }]}>
+                    Next
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>No recommendations yet.</ThemedText>
+          )}
         </View>
-
-        {/* Action Button */}
-        <Pressable
-          onPress={loadRecommendations}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            {
-              backgroundColor: theme.accent,
-              opacity: pressed ? 0.9 : 1,
-              transform: [{ scale: pressed ? 0.98 : 1 }],
-            },
-          ]}
-        >
-          <ThemedText style={styles.primaryButtonText}>
-            {isLoading ? 'Refreshing...' : 'Get new recommendations'}
-          </ThemedText>
-        </Pressable>
 
         {/* Footer hint */}
         <ThemedText style={[styles.footerHint, { color: theme.textMuted }]}>
-          {error ? error : 'Add more movies for better suggestions'}
+          {error ? error : 'Browse pages for more movies'}
         </ThemedText>
       </ScrollView>
     </View>
@@ -498,59 +754,104 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '400',
   },
-  cardStack: {
-    gap: 12,
+  posterGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  posterCard: {
+    flexBasis: '18%',
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  posterImage: {
+    width: '100%',
+    aspectRatio: 2 / 3,
+  },
+  posterPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  posterPlaceholderText: {
+    fontSize: 9,
+    fontWeight: '500',
+  },
+  posterInfo: {
+    padding: 6,
+    gap: 2,
+  },
+  posterTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+    lineHeight: 14,
+  },
+  posterMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  posterYear: {
+    fontSize: 10,
+  },
+  ratingBadge: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  ratingText: {
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  posterReason: {
+    fontSize: 9,
+    lineHeight: 12,
+  },
+  pager: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 4,
+  },
+  pagerButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  pagerButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pagerInfo: {
+    fontSize: 13,
+    fontWeight: '500',
+    minWidth: 40,
+    textAlign: 'center',
   },
   loadingState: {
     paddingVertical: 8,
     alignItems: 'center',
     gap: 8,
   },
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    overflow: 'hidden',
-    flexDirection: 'row',
-  },
-  cardContent: {
-    flex: 1,
-    padding: 18,
-    gap: 8,
-  },
-  cardMain: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 10,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    letterSpacing: -0.3,
-  },
-  cardYear: {
-    fontSize: 14,
-  },
-  cardReason: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  cardAccent: {
-    width: 4,
-  },
-  primaryButton: {
-    paddingVertical: 18,
-    borderRadius: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-  },
   footerHint: {
     textAlign: 'center',
     fontSize: 13,
+  },
+  moodExplanation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  moodExplanationText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    fontStyle: 'italic',
   },
 });
