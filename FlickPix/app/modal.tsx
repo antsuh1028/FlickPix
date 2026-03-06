@@ -1,16 +1,32 @@
 import { Link } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useThemeColor } from '@/hooks/use-theme-color';
 
 export default function ModalScreen() {
+  const cardColor = useThemeColor({}, 'surface');
+  const borderColor = useThemeColor({}, 'border');
+  const mutedText = useThemeColor({}, 'muted');
+
   return (
     <ThemedView style={styles.container}>
-      <ThemedText type="title">This is a modal</ThemedText>
-      <Link href="/" dismissTo style={styles.link}>
-        <ThemedText type="link">Go to home screen</ThemedText>
-      </Link>
+      <ThemedView style={[styles.card, { backgroundColor: cardColor, borderColor }]}>
+        <ThemedText type="title" style={styles.title}>
+          Quick Tip
+        </ThemedText>
+        <ThemedText style={[styles.description, { color: mutedText }]}>
+          You can switch profiles on Home to get different recommendation vibes.
+        </ThemedText>
+        <Link href="/" dismissTo asChild>
+          <Pressable style={styles.link}>
+            <ThemedText type="link" style={styles.linkText}>
+              Back to home
+            </ThemedText>
+          </Pressable>
+        </Link>
+      </ThemedView>
     </ThemedView>
   );
 }
@@ -22,8 +38,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 20,
   },
+  card: {
+    width: '100%',
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    gap: 14,
+  },
+  title: {
+    fontSize: 28,
+  },
+  description: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
   link: {
-    marginTop: 15,
-    paddingVertical: 15,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  linkText: {
+    lineHeight: 20,
   },
 });
