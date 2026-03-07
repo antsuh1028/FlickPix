@@ -9,6 +9,7 @@ import {
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getRecommendations } from '@/services/recommendations';
@@ -352,7 +353,10 @@ export default function SuggestionsScreen() {
           <ThemedText style={[styles.morePromptText, { color: theme.textMuted }]}>
             Rate more movies to improve your suggestions
           </ThemedText>
-          <Pressable style={[styles.morePromptButton, { backgroundColor: theme.accent }]}>
+          <Pressable
+            style={[styles.morePromptButton, { backgroundColor: theme.accent }]}
+            onPress={() => router.push('/(tabs)/profile')}
+          >
             <ThemedText style={styles.morePromptButtonText}>Rate Movies</ThemedText>
           </Pressable>
         </View>

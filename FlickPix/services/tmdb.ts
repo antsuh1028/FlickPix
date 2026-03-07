@@ -161,6 +161,18 @@ export async function getMovieCredits(movieId: number): Promise<Credits> {
   return tmdbFetch(`/movie/${movieId}/credits`);
 }
 
+export interface MovieVideo {
+  key: string;
+  site: string;
+  type: string;
+  name: string;
+}
+
+/** Get videos (trailers, teasers) for a movie. */
+export async function getMovieVideos(movieId: number): Promise<{ results: MovieVideo[] }> {
+  return tmdbFetch(`/movie/${movieId}/videos`);
+}
+
 /** Get movies similar to a given movie (TMDB's similarity). */
 export async function getSimilarMovies(movieId: number, page = 1): Promise<{ results: MovieSummary[]; total_results: number }> {
   return tmdbFetch(`/movie/${movieId}/similar`, { page });

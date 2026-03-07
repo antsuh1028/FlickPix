@@ -7,6 +7,8 @@ import {
   Dimensions,
   Image,
   Switch,
+  Modal,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,6 +19,9 @@ import {
   getAvailableUsers,
   getActiveUserId,
   clearCache,
+  getWatchlist,
+  removeFromWatchHistory,
+  removeFromWatchlist,
   type UserProfile,
   type WatchedMovie,
 } from '@/services/storage';
@@ -84,15 +89,12 @@ function deriveTopGenres(watchHistory: WatchedMovie[]) {
     }));
 }
 
-const WATCHLIST = [
-  { id: 27205, title: 'Inception', year: '2010', poster: null },
-  { id: 157336, title: 'Interstellar', year: '2014', poster: null },
-  { id: 424, title: "Schindler's List", year: '1993', poster: null },
-];
-
 export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [watchlist, setWatchlist] = useState<Awaited<ReturnType<typeof getWatchlist>>>([]);
+  const [listModal, setListModal] = useState<'watched' | 'watchlist' | null>(null);
+  const [hoveredStat, setHoveredStat] = useState<'watched' | 'watchlist' | null>(null);
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
 
@@ -100,6 +102,7 @@ export default function ProfileScreen() {
     useCallback(() => {
       clearCache();
       getUserProfile().then(setProfile);
+      getWatchlist().then(setWatchlist);
     }, [])
   );
 
@@ -115,6 +118,21 @@ export default function ProfileScreen() {
   const activeUserName = getAvailableUsers().find(
     (u) => u.id === getActiveUserId()
   )?.name ?? 'User';
+
+  const refreshLists = useCallback(() => {
+    getUserProfile().then(setProfile);
+    getWatchlist().then(setWatchlist);
+  }, []);
+
+  const handleRemoveWatched = useCallback(async (movieId: number) => {
+    await removeFromWatchHistory(movieId);
+    refreshLists();
+  }, [refreshLists]);
+
+  const handleRemoveWatchlist = useCallback(async (movieId: number) => {
+    await removeFromWatchlist(movieId);
+    refreshLists();
+  }, [refreshLists]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
@@ -151,17 +169,55 @@ export default function ProfileScreen() {
 
         {/* Stats Grid */}
         <View style={styles.statsGrid}>
-          <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statValue, { color: theme.accent }]}>{watchedCount}</ThemedText>
-            <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Watched</ThemedText>
+          <View
+            onMouseEnter={() => setHoveredStat('watched')}
+            onMouseLeave={() => setHoveredStat(null)}
+            style={[styles.statBoxWrapper, Platform.OS === 'web' && { cursor: 'pointer' }]}
+          >
+            <Pressable
+              style={({ pressed }) => [
+                styles.statBox,
+                {
+                  backgroundColor: theme.surface,
+                  borderColor: theme.cardBorder,
+                  opacity: pressed ? 0.92 : 1,
+                  transform: [{
+                    scale: pressed ? 1.1 : hoveredStat === 'watched' ? 1.04 : 1.0,
+                  }],
+                },
+              ]}
+              onPress={() => setListModal('watched')}
+            >
+              <ThemedText style={[styles.statValue, { color: theme.accent }]}>{watchedCount}</ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Watched</ThemedText>
+            </Pressable>
           </View>
           <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
             <ThemedText style={[styles.statValue, { color: theme.green }]}>{avgRating}</ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Avg Rating</ThemedText>
           </View>
-          <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            <ThemedText style={[styles.statValue, { color: theme.orange }]}>12</ThemedText>
-            <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Watchlist</ThemedText>
+          <View
+            onMouseEnter={() => setHoveredStat('watchlist')}
+            onMouseLeave={() => setHoveredStat(null)}
+            style={[styles.statBoxWrapper, Platform.OS === 'web' && { cursor: 'pointer' }]}
+          >
+            <Pressable
+              style={({ pressed }) => [
+                styles.statBox,
+                {
+                  backgroundColor: theme.surface,
+                  borderColor: theme.cardBorder,
+                  opacity: pressed ? 0.92 : 1,
+                  transform: [{
+                    scale: pressed ? 1.1 : hoveredStat === 'watchlist' ? 1.04 : 1.0,
+                  }],
+                },
+              ]}
+              onPress={() => setListModal('watchlist')}
+            >
+              <ThemedText style={[styles.statValue, { color: theme.orange }]}>{watchlist.length}</ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Watchlist</ThemedText>
+            </Pressable>
           </View>
           <View style={[styles.statBox, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
             <ThemedText style={[styles.statValue, { color: theme.text }]}>94h</ThemedText>
@@ -259,35 +315,41 @@ export default function ProfileScreen() {
             </ThemedText>
             <Pressable>
               <ThemedText style={[styles.seeAllText, { color: theme.accent }]}>
-                See all ({WATCHLIST.length})
+                See all ({watchlist.length})
               </ThemedText>
             </Pressable>
           </View>
           
           <View style={[styles.watchlistCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
-            {WATCHLIST.map((movie, index) => (
-              <View key={movie.id}>
-                <View style={styles.watchlistItem}>
-                  <View style={[styles.watchlistPoster, { backgroundColor: theme.posterBg }]}>
-                    <ThemedText style={styles.watchlistPosterEmoji}>🎬</ThemedText>
+            {watchlist.length === 0 ? (
+              <ThemedText style={[styles.watchlistEmpty, { color: theme.textMuted }]}>
+                No movies in your watchlist yet. Add some from Home or Suggestions!
+              </ThemedText>
+            ) : (
+              watchlist.map((movie, index) => (
+                <View key={movie.movieId}>
+                  <View style={styles.watchlistItem}>
+                    <View style={[styles.watchlistPoster, { backgroundColor: theme.posterBg }]}>
+                      <ThemedText style={styles.watchlistPosterEmoji}>🎬</ThemedText>
+                    </View>
+                    <View style={styles.watchlistInfo}>
+                      <ThemedText style={[styles.watchlistTitle, { color: theme.text }]}>
+                        {movie.title}
+                      </ThemedText>
+                      <ThemedText style={[styles.watchlistYear, { color: theme.textMuted }]}>
+                        {movie.addedAt ? new Date(movie.addedAt).getFullYear().toString() : '—'}
+                      </ThemedText>
+                    </View>
+                    <Pressable style={[styles.watchlistButton, { backgroundColor: theme.accent }]}>
+                      <ThemedText style={styles.watchlistButtonText}>▶</ThemedText>
+                    </Pressable>
                   </View>
-                  <View style={styles.watchlistInfo}>
-                    <ThemedText style={[styles.watchlistTitle, { color: theme.text }]}>
-                      {movie.title}
-                    </ThemedText>
-                    <ThemedText style={[styles.watchlistYear, { color: theme.textMuted }]}>
-                      {movie.year}
-                    </ThemedText>
-                  </View>
-                  <Pressable style={[styles.watchlistButton, { backgroundColor: theme.accent }]}>
-                    <ThemedText style={styles.watchlistButtonText}>▶</ThemedText>
-                  </Pressable>
+                  {index < watchlist.length - 1 && (
+                    <View style={[styles.divider, { backgroundColor: theme.cardBorder }]} />
+                  )}
                 </View>
-                {index < WATCHLIST.length - 1 && (
-                  <View style={[styles.divider, { backgroundColor: theme.cardBorder }]} />
-                )}
-              </View>
-            ))}
+              ))
+            )}
           </View>
         </View>
 
@@ -379,6 +441,97 @@ export default function ProfileScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* List modal (Watched / Watchlist) */}
+      <Modal
+        visible={listModal !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setListModal(null)}
+      >
+        <Pressable style={styles.listModalOverlay} onPress={() => setListModal(null)}>
+          <Pressable
+            style={[styles.listModalContent, { backgroundColor: theme.bg, borderColor: theme.cardBorder }]}
+            onPress={() => {}}
+          >
+            <View style={[styles.listModalHeader, { borderBottomColor: theme.cardBorder }]}>
+              <ThemedText style={[styles.listModalTitle, { color: theme.text }]}>
+                {listModal === 'watched' ? 'Watched' : 'Watchlist'}
+              </ThemedText>
+              <Pressable
+                style={[styles.listModalClose, { backgroundColor: theme.card }]}
+                onPress={() => setListModal(null)}
+              >
+                <ThemedText style={[styles.listModalCloseText, { color: theme.text }]}>✕</ThemedText>
+              </Pressable>
+            </View>
+            <ScrollView
+              style={styles.listModalScroll}
+              contentContainerStyle={styles.listModalScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {listModal === 'watched' && (
+                watchHistory.length === 0 ? (
+                  <ThemedText style={[styles.listModalEmpty, { color: theme.textMuted }]}>
+                    No watched movies yet.
+                  </ThemedText>
+                ) : (
+                  watchHistory.map((movie) => (
+                    <View
+                      key={movie.movieId}
+                      style={[styles.listModalRow, { borderColor: theme.cardBorder }]}
+                    >
+                      <View style={styles.listModalRowInfo}>
+                        <ThemedText style={[styles.listModalRowTitle, { color: theme.text }]} numberOfLines={1}>
+                          {movie.title}
+                        </ThemedText>
+                        <ThemedText style={[styles.listModalRowSub, { color: theme.textMuted }]}>
+                          ★ {movie.rating} · {movie.watchedAt}
+                        </ThemedText>
+                      </View>
+                      <Pressable
+                        style={[styles.listModalRemoveBtn, { backgroundColor: theme.red }]}
+                        onPress={() => handleRemoveWatched(movie.movieId)}
+                      >
+                        <ThemedText style={styles.listModalRemoveText}>Remove</ThemedText>
+                      </Pressable>
+                    </View>
+                  ))
+                )
+              )}
+              {listModal === 'watchlist' && (
+                watchlist.length === 0 ? (
+                  <ThemedText style={[styles.listModalEmpty, { color: theme.textMuted }]}>
+                    No movies in watchlist.
+                  </ThemedText>
+                ) : (
+                  watchlist.map((movie) => (
+                    <View
+                      key={movie.movieId}
+                      style={[styles.listModalRow, { borderColor: theme.cardBorder }]}
+                    >
+                      <View style={styles.listModalRowInfo}>
+                        <ThemedText style={[styles.listModalRowTitle, { color: theme.text }]} numberOfLines={1}>
+                          {movie.title}
+                        </ThemedText>
+                        <ThemedText style={[styles.listModalRowSub, { color: theme.textMuted }]}>
+                          {movie.addedAt ? new Date(movie.addedAt).toLocaleDateString() : ''}
+                        </ThemedText>
+                      </View>
+                      <Pressable
+                        style={[styles.listModalRemoveBtn, { backgroundColor: theme.red }]}
+                        onPress={() => handleRemoveWatchlist(movie.movieId)}
+                      >
+                        <ThemedText style={styles.listModalRemoveText}>Remove</ThemedText>
+                      </Pressable>
+                    </View>
+                  ))
+                )
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -440,6 +593,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 10,
     marginBottom: 28,
+  },
+  statBoxWrapper: {
+    width: (SCREEN_WIDTH - 50) / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statBox: {
     width: (SCREEN_WIDTH - 50) / 2,
@@ -563,6 +721,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  watchlistEmpty: {
+    padding: 20,
+    fontSize: 14,
+    textAlign: 'center',
+  },
   watchlistItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -650,5 +813,85 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 12,
     marginTop: 20,
+  },
+  listModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  listModalContent: {
+    width: '100%',
+    maxHeight: '80%',
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  listModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  listModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  listModalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listModalCloseText: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  listModalScroll: {
+    maxHeight: 400,
+  },
+  listModalScrollContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  listModalEmpty: {
+    textAlign: 'center',
+    paddingVertical: 32,
+    fontSize: 15,
+  },
+  listModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  listModalRowInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  listModalRowTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  listModalRowSub: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  listModalRemoveBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  listModalRemoveText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

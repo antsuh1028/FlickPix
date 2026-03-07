@@ -31,6 +31,13 @@ export interface UserEntry {
   profile: UserProfile;
 }
 
+export interface WatchlistEntry {
+  movieId: number;
+  title: string;
+  posterPath: string | null;
+  addedAt: string; // ISO date
+}
+
 // ── Built-in user profiles ────────────────────────────────────────────────
 
 const USER_PROFILES: UserEntry[] = [
@@ -85,9 +92,14 @@ const USER_PROFILES: UserEntry[] = [
 let _cachedProfile: UserProfile | null = null;
 let _activeUserId: string = "default";
 const STORAGE_KEY_PREFIX = "flickpix_user_profile_v1";
+const WATCHLIST_KEY_PREFIX = "flickpix_watchlist_v1";
 
 function storageKey(): string {
   return `${STORAGE_KEY_PREFIX}_${_activeUserId}`;
+}
+
+function watchlistKey(): string {
+  return `${WATCHLIST_KEY_PREFIX}_${_activeUserId}`;
 }
 
 /**
@@ -278,8 +290,85 @@ export async function updateRating(movieId: number, rating: number): Promise<voi
 }
 
 /**
+ * Remove a movie from watch history.
+ */
+export async function removeFromWatchHistory(movieId: number): Promise<void> {
+  const profile = await getUserProfile();
+  profile.watchHistory = profile.watchHistory.filter((m) => m.movieId !== movieId);
+  _cachedProfile = profile;
+
+  await writeToPersistentStorage(profile);
+}
+
+/**
  * Clear cache (useful for testing).
  */
 export function clearCache(): void {
   _cachedProfile = null;
+}
+
+// ── Watchlist ─────────────────────────────────────────────────────────────
+
+async function readWatchlistFromStorage(): Promise<WatchlistEntry[]> {
+  if (isNodeRuntime()) return [];
+  const key = watchlistKey();
+  if (typeof window !== "undefined" && window.localStorage) {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as WatchlistEntry[]) : [];
+  }
+  const asyncStorage = await getAsyncStorage();
+  if (!asyncStorage) return [];
+  const raw = await asyncStorage.getItem(key);
+  return raw ? (JSON.parse(raw) as WatchlistEntry[]) : [];
+}
+
+async function writeWatchlistToStorage(entries: WatchlistEntry[]): Promise<void> {
+  if (isNodeRuntime()) return;
+  const key = watchlistKey();
+  const serialized = JSON.stringify(entries);
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.setItem(key, serialized);
+    return;
+  }
+  const asyncStorage = await getAsyncStorage();
+  if (asyncStorage) await asyncStorage.setItem(key, serialized);
+}
+
+/**
+ * Get the user's watchlist.
+ */
+export async function getWatchlist(): Promise<WatchlistEntry[]> {
+  return readWatchlistFromStorage();
+}
+
+/**
+ * Add a movie to the watchlist.
+ */
+export async function addToWatchlist(entry: { movieId: number; title: string; posterPath?: string | null }): Promise<void> {
+  const list = await readWatchlistFromStorage();
+  if (list.some((e) => e.movieId === entry.movieId)) return;
+  list.push({
+    movieId: entry.movieId,
+    title: entry.title,
+    posterPath: entry.posterPath ?? null,
+    addedAt: new Date().toISOString(),
+  });
+  await writeWatchlistToStorage(list);
+}
+
+/**
+ * Remove a movie from the watchlist.
+ */
+export async function removeFromWatchlist(movieId: number): Promise<void> {
+  const list = await readWatchlistFromStorage();
+  const next = list.filter((e) => e.movieId !== movieId);
+  await writeWatchlistToStorage(next);
+}
+
+/**
+ * Check if a movie is in the watchlist.
+ */
+export async function isInWatchlist(movieId: number): Promise<boolean> {
+  const list = await readWatchlistFromStorage();
+  return list.some((e) => e.movieId === movieId);
 }

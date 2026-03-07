@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -14,7 +15,25 @@ import { ThemedText } from '@/components/themed-text';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getRecommendations, getPosterUrl, type Recommendation } from '@/services/recommendations';
 import { getMoodRecommendations, getMoodPage, type MoodSearchResult } from '@/services/moodSearch';
-import { getAvailableUsers, getActiveUserId, setActiveUser } from '@/services/storage';
+import {
+  getAvailableUsers,
+  getActiveUserId,
+  setActiveUser,
+  addToWatchHistory,
+  addToWatchlist,
+  removeFromWatchlist,
+  isInWatchlist,
+  getWatchedMovieIds,
+} from '@/services/storage';
+import {
+  getMovieDetails,
+  getMovieCredits,
+  getMovieVideos,
+  posterUrl as tmdbPosterUrl,
+  backdropUrl as tmdbBackdropUrl,
+  type MovieDetails,
+  type Credits,
+} from '@/services/tmdb';
 
 const COLORS = {
   dark: {
@@ -57,6 +76,14 @@ export default function HomeScreen() {
   const [moodPage, setMoodPage] = useState(1);
   const [forYouPage, setForYouPage] = useState(1);
   const [activeUser, setActiveUserState] = useState(getActiveUserId());
+  const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
+  const [movieDetail, setMovieDetail] = useState<MovieDetails | null>(null);
+  const [movieCredits, setMovieCredits] = useState<Credits | null>(null);
+  const [trailerKey, setTrailerKey] = useState<string | null>(null);
+  const [movieDetailLoading, setMovieDetailLoading] = useState(false);
+  const [movieDetailError, setMovieDetailError] = useState<string | null>(null);
+  const [movieInWatchlist, setMovieInWatchlist] = useState(false);
+  const [movieWatched, setMovieWatched] = useState(false);
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
 
@@ -82,6 +109,90 @@ export default function HomeScreen() {
   useEffect(() => {
     loadRecommendations(1);
   }, [loadRecommendations]);
+
+  useEffect(() => {
+    if (!selectedMovieId) {
+      setMovieDetail(null);
+      setMovieCredits(null);
+      setTrailerKey(null);
+      setMovieDetailError(null);
+      return;
+    }
+    let cancelled = false;
+    setMovieDetailLoading(true);
+    setMovieDetailError(null);
+    Promise.all([
+      getMovieDetails(selectedMovieId),
+      getMovieCredits(selectedMovieId),
+      getMovieVideos(selectedMovieId),
+      isInWatchlist(selectedMovieId),
+      getWatchedMovieIds(),
+    ])
+      .then(([details, credits, videos, inList, watchedIds]) => {
+        if (cancelled) return;
+        setMovieDetail(details);
+        setMovieCredits(credits);
+        const trailer = videos.results.find(
+          (v) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')
+        );
+        setTrailerKey(trailer?.key ?? null);
+        setMovieInWatchlist(inList);
+        setMovieWatched(watchedIds.includes(selectedMovieId));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setMovieDetailError(err instanceof Error ? err.message : 'Failed to load movie');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMovieDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMovieId]);
+
+  const openTrailer = () => {
+    if (trailerKey) {
+      Linking.openURL(`https://www.youtube.com/watch?v=${trailerKey}`);
+    }
+  };
+
+  const handleAddToWatched = async () => {
+    if (!movieDetail || !selectedMovieId) return;
+    try {
+      await addToWatchHistory({
+        movieId: selectedMovieId,
+        title: movieDetail.title,
+        rating: 7,
+        watchedAt: new Date().toISOString().slice(0, 10),
+        genres: movieDetail.genres.map((g) => g.id),
+      });
+      setMovieWatched(true);
+      loadRecommendations(forYouPage);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleWatchlistPress = async () => {
+    if (!selectedMovieId || !movieDetail) return;
+    try {
+      if (movieInWatchlist) {
+        await removeFromWatchlist(selectedMovieId);
+        setMovieInWatchlist(false);
+      } else {
+        await addToWatchlist({
+          movieId: selectedMovieId,
+          title: movieDetail.title,
+          posterPath: movieDetail.poster_path,
+        });
+        setMovieInWatchlist(true);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const switchUser = (userId: string) => {
     setActiveUser(userId);
@@ -247,6 +358,172 @@ export default function HomeScreen() {
           </Pressable>
         </Modal>
 
+        {/* Movie Detail Modal */}
+        <Modal
+          visible={selectedMovieId !== null}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setSelectedMovieId(null)}
+        >
+          <View style={styles.detailModalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedMovieId(null)} />
+            <View style={[styles.detailModalContent, { backgroundColor: theme.bg }]}>
+              <Pressable
+                style={[styles.detailModalClose, { backgroundColor: theme.card }]}
+                onPress={() => setSelectedMovieId(null)}
+              >
+                <ThemedText style={[styles.detailModalCloseText, { color: theme.text }]}>✕</ThemedText>
+              </Pressable>
+              {movieDetailLoading ? (
+                <View style={styles.detailModalLoading}>
+                  <ActivityIndicator size="large" color={theme.accent} />
+                  <ThemedText style={[styles.detailModalLoadingText, { color: theme.textMuted }]}>
+                    Loading...
+                  </ThemedText>
+                </View>
+              ) : movieDetailError ? (
+                <View style={styles.detailModalLoading}>
+                  <ThemedText style={[styles.detailModalLoadingText, { color: theme.textMuted }]}>
+                    {movieDetailError}
+                  </ThemedText>
+                  <Pressable
+                    style={[styles.detailModalButton, { backgroundColor: theme.accent }]}
+                    onPress={() => setSelectedMovieId(null)}
+                  >
+                    <ThemedText style={styles.detailModalButtonText}>Close</ThemedText>
+                  </Pressable>
+                </View>
+              ) : movieDetail ? (
+                <ScrollView
+                  style={styles.detailModalScroll}
+                  contentContainerStyle={styles.detailModalScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={styles.detailModalBackdrop}>
+                    {tmdbBackdropUrl(movieDetail.backdrop_path, 'w780') ? (
+                      <Image
+                        source={{ uri: tmdbBackdropUrl(movieDetail.backdrop_path, 'w780')! }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                      />
+                    ) : tmdbPosterUrl(movieDetail.poster_path, 'w500') ? (
+                      <Image
+                        source={{ uri: tmdbPosterUrl(movieDetail.poster_path, 'w500')! }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <LinearGradient
+                      colors={['transparent', theme.bg]}
+                      style={styles.detailModalBackdropGradient}
+                    />
+                  </View>
+                  <View style={styles.detailModalBody}>
+                    <ThemedText style={[styles.detailModalTitle, { color: theme.text }]}>
+                      {movieDetail.title}
+                    </ThemedText>
+                    <View style={styles.detailModalMeta}>
+                      <ThemedText style={[styles.detailMetaText, { color: theme.textMuted }]}>
+                        {movieDetail.release_date?.slice(0, 4) || '—'}
+                      </ThemedText>
+                      <ThemedText style={[styles.detailMetaDot, { color: theme.textMuted }]}>•</ThemedText>
+                      <ThemedText style={[styles.detailMetaText, { color: theme.textMuted }]}>
+                        ★ {movieDetail.vote_average.toFixed(1)}
+                      </ThemedText>
+                      {movieDetail.runtime ? (
+                        <>
+                          <ThemedText style={[styles.detailMetaDot, { color: theme.textMuted }]}>•</ThemedText>
+                          <ThemedText style={[styles.detailMetaText, { color: theme.textMuted }]}>
+                            {movieDetail.runtime} min
+                          </ThemedText>
+                        </>
+                      ) : null}
+                    </View>
+                    {movieDetail.genres.length > 0 && (
+                      <View style={styles.detailModalGenres}>
+                        {movieDetail.genres.slice(0, 5).map((g) => (
+                          <View
+                            key={g.id}
+                            style={[styles.detailGenreChip, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}
+                          >
+                            <ThemedText style={[styles.detailGenreChipText, { color: theme.accent }]}>
+                              {g.name}
+                            </ThemedText>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {movieDetail.tagline ? (
+                      <ThemedText style={[styles.detailTagline, { color: theme.textMuted }]}>
+                        {movieDetail.tagline}
+                      </ThemedText>
+                    ) : null}
+                    {movieDetail.overview ? (
+                      <>
+                        <ThemedText style={[styles.detailSectionLabel, { color: theme.textMuted }]}>
+                          SYNOPSIS
+                        </ThemedText>
+                        <ThemedText style={[styles.detailOverview, { color: theme.text }]}>
+                          {movieDetail.overview}
+                        </ThemedText>
+                      </>
+                    ) : null}
+                    {trailerKey ? (
+                      <Pressable
+                        style={[styles.detailModalButton, styles.detailTrailerButton, { backgroundColor: theme.accent }]}
+                        onPress={openTrailer}
+                      >
+                        <ThemedText style={styles.detailModalButtonText}>▶ Watch Trailer</ThemedText>
+                      </Pressable>
+                    ) : null}
+                    {movieCredits && movieCredits.cast.length > 0 && (
+                      <>
+                        <ThemedText style={[styles.detailSectionLabel, { color: theme.textMuted }]}>
+                          CAST
+                        </ThemedText>
+                        <ThemedText style={[styles.detailCastText, { color: theme.text }]}>
+                          {movieCredits.cast.slice(0, 10).map((c) => c.name).join(' · ')}
+                        </ThemedText>
+                      </>
+                    )}
+                    <View style={styles.detailModalActions}>
+                      {!movieWatched && (
+                        <Pressable
+                          style={[styles.detailModalActionButton, { backgroundColor: theme.accent }]}
+                          onPress={handleAddToWatched}
+                        >
+                          <ThemedText style={styles.detailModalButtonText}>Add to Watched</ThemedText>
+                        </Pressable>
+                      )}
+                      {movieWatched && (
+                        <View style={[styles.detailModalActionButton, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                          <ThemedText style={[styles.detailModalButtonText, { color: theme.accent }]}>✓ Watched</ThemedText>
+                        </View>
+                      )}
+                      <Pressable
+                        style={[
+                          styles.detailModalActionButton,
+                          { backgroundColor: movieInWatchlist ? theme.accentSoft : theme.card, borderColor: theme.cardBorder },
+                        ]}
+                        onPress={handleWatchlistPress}
+                      >
+                        <ThemedText
+                          style={[
+                            styles.detailModalButtonText,
+                            { color: movieInWatchlist ? theme.accent : theme.text },
+                          ]}
+                        >
+                          {movieInWatchlist ? 'In Watchlist' : '+ Watchlist'}
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                  </View>
+                </ScrollView>
+              ) : null}
+            </View>
+          </View>
+        </Modal>
+
         {/* Input Section */}
         <View style={styles.section}>
           <ThemedText style={[styles.sectionLabel, { color: theme.textMuted }]}>
@@ -372,6 +649,7 @@ export default function HomeScreen() {
                           transform: [{ scale: pressed ? 0.97 : 1 }],
                         },
                       ]}
+                      onPress={() => setSelectedMovieId(movie.id)}
                     >
                       {posterUri ? (
                         <Image source={{ uri: posterUri }} style={styles.posterImage} />
@@ -498,6 +776,7 @@ export default function HomeScreen() {
                           transform: [{ scale: pressed ? 0.97 : 1 }],
                         },
                       ]}
+                      onPress={() => setSelectedMovieId(movie.id)}
                     >
                       {posterUri ? (
                         <Image source={{ uri: posterUri }} style={styles.posterImage} />
@@ -853,5 +1132,147 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     fontStyle: 'italic',
+  },
+  // Movie detail modal
+  detailModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  detailModalContent: {
+    width: '100%',
+    maxHeight: '90%',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  detailModalClose: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailModalCloseText: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  detailModalLoading: {
+    padding: 48,
+    alignItems: 'center',
+    gap: 16,
+  },
+  detailModalLoadingText: {
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  detailModalScroll: {
+    maxHeight: '100%',
+  },
+  detailModalScrollContent: {
+    paddingBottom: 32,
+  },
+  detailModalBackdrop: {
+    height: 180,
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  detailModalBackdropGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 100,
+  },
+  detailModalBody: {
+    padding: 20,
+    gap: 10,
+  },
+  detailModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  detailModalMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  detailMetaText: {
+    fontSize: 14,
+  },
+  detailMetaDot: {
+    fontSize: 12,
+  },
+  detailModalGenres: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  detailGenreChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  detailGenreChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  detailTagline: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  detailSectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  detailOverview: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  detailModalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  detailTrailerButton: {
+    marginTop: 12,
+  },
+  detailModalButtonText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  detailCastText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  detailModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+    flexWrap: 'wrap',
+  },
+  detailModalActionButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    minWidth: 120,
+    alignItems: 'center',
   },
 });
