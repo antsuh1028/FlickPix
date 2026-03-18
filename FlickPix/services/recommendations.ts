@@ -29,7 +29,6 @@ export interface RecommendationOptions {
   limit?: number;           // How many to return (default: 10)
   minRating?: number;       // Minimum TMDB vote_average (default: 6.5)
   minVoteCount?: number;    // Minimum vote count for quality (default: 100)
-  page?: number;            // TMDB discover page (default: 1)
 }
 
 // ── Recommendation Engine ──────────────────────────────────────────────────
@@ -49,10 +48,9 @@ export async function getRecommendations(
   options: RecommendationOptions = {}
 ): Promise<Recommendation[]> {
   const {
-    limit = 10,
-    minRating = 6.5,
+    limit = 8,
+    minRating = 4.5,
     minVoteCount = 100,
-    page = 1,
   } = options;
 
   // Load user data
@@ -87,13 +85,21 @@ export async function getRecommendations(
   }
 
   const genreStr = topGenres.join(",");
-  const response = await tmdb.discoverMovies({
+  const discoverParams = {
     with_genres: genreStr,
     sort_by: "vote_average.desc",
     "vote_average.gte": minRating,
     "vote_count.gte": minVoteCount,
-    page,
-  });
+  };
+
+  // Clamp the random page to what TMDB actually has for these filters
+  const firstResponse = await tmdb.discoverMovies({ ...discoverParams, page: 1 });
+  const totalPages = Math.min(firstResponse.total_pages ?? 1, 8);
+  const safePage = totalPages > 1 ? Math.ceil(Math.random() * totalPages) : 1;
+
+  const response = safePage === 1
+    ? firstResponse
+    : await tmdb.discoverMovies({ ...discoverParams, page: safePage });
 
   const allCandidates = response.results;
 
@@ -123,11 +129,17 @@ export async function getRecommendations(
     return { movie, score };
   });
 
-  // Sort by score descending
+  // Sort by score descending, then shuffle within score tiers for variety
   scored.sort((a, b) => b.score - a.score);
+  // Shuffle top candidates (up to 3x limit) so each refresh shows different movies
+  const pool = scored.slice(0, limit * 3);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
 
   // Take top N
-  const topN = scored.slice(0, limit);
+  const topN = pool.slice(0, limit);
 
   // Load genre names for reasons
   const genres = await tmdb.getGenres();

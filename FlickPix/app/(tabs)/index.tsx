@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -25,14 +25,17 @@ import {
   isInWatchlist,
   getWatchedMovieIds,
 } from '@/services/storage';
+import { ratingColor, ratingBg } from '@/utils/ratingColors';
 import {
   getMovieDetails,
   getMovieCredits,
   getMovieVideos,
+  searchMovies,
   posterUrl as tmdbPosterUrl,
   backdropUrl as tmdbBackdropUrl,
   type MovieDetails,
   type Credits,
+  type MovieSummary,
 } from '@/services/tmdb';
 
 const COLORS = {
@@ -62,6 +65,9 @@ const COLORS = {
 
 export default function HomeScreen() {
   const [movieInput, setMovieInput] = useState('');
+  const [movieSearchResults, setMovieSearchResults] = useState<MovieSummary[]>([]);
+  const [movieSearching, setMovieSearching] = useState(false);
+  const movieSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [likedMovies, setLikedMovies] = useState<string[]>([]);
   const [picks, setPicks] = useState<Recommendation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -84,6 +90,7 @@ export default function HomeScreen() {
   const [movieDetailError, setMovieDetailError] = useState<string | null>(null);
   const [movieInWatchlist, setMovieInWatchlist] = useState(false);
   const [movieWatched, setMovieWatched] = useState(false);
+  const [showRatingPicker, setShowRatingPicker] = useState(false);
   const colorScheme = useColorScheme();
   const theme = COLORS[colorScheme ?? 'dark'];
 
@@ -94,7 +101,7 @@ export default function HomeScreen() {
     setIsLoading(true);
     setError(null);
     try {
-      const recs = await getRecommendations({ limit: 10, page });
+      const recs = await getRecommendations({ limit: 10 });
       setPicks(recs);
       setForYouPage(page);
     } catch (loadError) {
@@ -116,6 +123,7 @@ export default function HomeScreen() {
       setMovieCredits(null);
       setTrailerKey(null);
       setMovieDetailError(null);
+      setShowRatingPicker(false);
       return;
     }
     let cancelled = false;
@@ -158,17 +166,19 @@ export default function HomeScreen() {
     }
   };
 
-  const handleAddToWatched = async () => {
+  const handleAddToWatched = async (rating: number) => {
     if (!movieDetail || !selectedMovieId) return;
     try {
       await addToWatchHistory({
         movieId: selectedMovieId,
         title: movieDetail.title,
-        rating: 7,
+        rating,
         watchedAt: new Date().toISOString().slice(0, 10),
         genres: movieDetail.genres.map((g) => g.id),
+        posterPath: movieDetail.poster_path,
       });
       setMovieWatched(true);
+      setShowRatingPicker(false);
       loadRecommendations(forYouPage);
     } catch {
       // ignore
@@ -210,7 +220,7 @@ export default function HomeScreen() {
     setMoodFilters(null);
     try {
       const { recommendations, moodExplanation: explanation, filters } =
-        await getMoodRecommendations(moodInput.trim(), 10);
+        await getMoodRecommendations(moodInput.trim(), 8);
       setMoodResults(recommendations);
       setMoodExplanation(explanation);
       setMoodFilters(filters);
@@ -232,7 +242,7 @@ export default function HomeScreen() {
     setMoodLoading(true);
     setMoodError(null);
     try {
-      const recs = await getMoodPage(moodFilters, moodExplanation, page, 10);
+      const recs = await getMoodPage(moodFilters, moodExplanation, page, 8);
       setMoodResults(recs);
       setMoodPage(page);
     } catch (e) {
@@ -252,12 +262,28 @@ export default function HomeScreen() {
     setMoodPage(1);
   };
 
-  const addMovie = () => {
-    if (movieInput.trim() && !likedMovies.includes(movieInput.trim())) {
-      setLikedMovies([...likedMovies, movieInput.trim()]);
-      setMovieInput('');
+  const handleMovieInputChange = useCallback((text: string) => {
+    setMovieInput(text);
+    if (movieSearchTimer.current) clearTimeout(movieSearchTimer.current);
+    if (!text.trim()) { setMovieSearchResults([]); return; }
+    movieSearchTimer.current = setTimeout(async () => {
+      setMovieSearching(true);
+      try {
+        const res = await searchMovies(text.trim(), 1);
+        setMovieSearchResults(res.results.slice(0, 6));
+      } catch { setMovieSearchResults([]); }
+      finally { setMovieSearching(false); }
+    }, 350);
+  }, []);
+
+  const selectSearchResult = useCallback((movie: MovieSummary) => {
+    setMovieInput('');
+    setMovieSearchResults([]);
+    if (!likedMovies.includes(movie.title)) {
+      setLikedMovies((prev) => [...prev, movie.title]);
     }
-  };
+    setSelectedMovieId(movie.id);
+  }, [likedMovies]);
 
   const removeMovie = (index: number) => {
     setLikedMovies(likedMovies.filter((_, i) => i !== index));
@@ -487,13 +513,29 @@ export default function HomeScreen() {
                       </>
                     )}
                     <View style={styles.detailModalActions}>
-                      {!movieWatched && (
+                      {!movieWatched && !showRatingPicker && (
                         <Pressable
                           style={[styles.detailModalActionButton, { backgroundColor: theme.accent }]}
-                          onPress={handleAddToWatched}
+                          onPress={() => setShowRatingPicker(true)}
                         >
                           <ThemedText style={styles.detailModalButtonText}>Add to Watched</ThemedText>
                         </Pressable>
+                      )}
+                      {!movieWatched && showRatingPicker && (
+                        <View style={styles.ratingPickerContainer}>
+                          <ThemedText style={[styles.ratingPickerLabel, { color: theme.textMuted }]}>Rate it:</ThemedText>
+                          <View style={styles.ratingPickerRow}>
+                            {[1,2,3,4,5,6,7,8,9,10].map((r) => (
+                              <Pressable
+                                key={r}
+                                style={[styles.ratingPickerChip, { backgroundColor: ratingBg(r), borderColor: ratingColor(r) }]}
+                                onPress={() => handleAddToWatched(r)}
+                              >
+                                <ThemedText style={[styles.ratingPickerChipText, { color: ratingColor(r) }]}>{r}</ThemedText>
+                              </Pressable>
+                            ))}
+                          </View>
+                        </View>
                       )}
                       {movieWatched && (
                         <View style={[styles.detailModalActionButton, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
@@ -527,32 +569,59 @@ export default function HomeScreen() {
         {/* Input Section */}
         <View style={styles.section}>
           <ThemedText style={[styles.sectionLabel, { color: theme.textMuted }]}>
-            MOVIES YOU LOVE
+            SEARCH MOVIES
           </ThemedText>
-          <View
-            style={[
-              styles.inputContainer,
-              { backgroundColor: theme.inputBg, borderColor: theme.cardBorder },
-            ]}
-          >
-            <TextInput
-              style={[styles.input, { color: theme.text }]}
-              placeholder="Add a movie you enjoy..."
-              placeholderTextColor={theme.textMuted}
-              value={movieInput}
-              onChangeText={setMovieInput}
-              onSubmitEditing={addMovie}
-              returnKeyType="done"
-            />
-            <Pressable
-              style={({ pressed }) => [
-                styles.addButton,
-                { backgroundColor: theme.accent, opacity: pressed ? 0.8 : 1 },
+          <View style={styles.movieSearchWrapper}>
+            <View
+              style={[
+                styles.inputContainer,
+                { backgroundColor: theme.inputBg, borderColor: theme.cardBorder },
               ]}
-              onPress={addMovie}
             >
-              <ThemedText style={styles.addButtonText}>+</ThemedText>
-            </Pressable>
+              <TextInput
+                style={[styles.input, { color: theme.text }]}
+                placeholder="Search for a movie..."
+                placeholderTextColor={theme.textMuted}
+                value={movieInput}
+                onChangeText={handleMovieInputChange}
+                returnKeyType="search"
+              />
+              {movieSearching && <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 12 }} />}
+            </View>
+
+            {movieSearchResults.length > 0 && (
+              <View style={[styles.searchDropdown, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder }]}>
+                {movieSearchResults.map((movie) => {
+                  const posterUri = movie.poster_path ? `https://image.tmdb.org/t/p/w92${movie.poster_path}` : null;
+                  return (
+                    <Pressable
+                      key={movie.id}
+                      style={({ pressed }) => [
+                        styles.searchDropdownItem,
+                        { borderBottomColor: theme.cardBorder, opacity: pressed ? 0.7 : 1 },
+                      ]}
+                      onPress={() => selectSearchResult(movie)}
+                    >
+                      {posterUri ? (
+                        <Image source={{ uri: posterUri }} style={styles.searchDropdownPoster} />
+                      ) : (
+                        <View style={[styles.searchDropdownPoster, { backgroundColor: theme.card, alignItems: 'center', justifyContent: 'center' }]}>
+                          <ThemedText style={{ fontSize: 14 }}>🎬</ThemedText>
+                        </View>
+                      )}
+                      <View style={styles.searchDropdownInfo}>
+                        <ThemedText style={[styles.searchDropdownTitle, { color: theme.text }]} numberOfLines={1}>
+                          {movie.title}
+                        </ThemedText>
+                        <ThemedText style={[styles.searchDropdownYear, { color: theme.textMuted }]}>
+                          {movie.release_date?.slice(0, 4) || '—'} · ★ {movie.vote_average.toFixed(1)}
+                        </ThemedText>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           {likedMovies.length > 0 && (
@@ -668,8 +737,8 @@ export default function HomeScreen() {
                           <ThemedText style={[styles.posterYear, { color: theme.textMuted }]}>
                             {movie.releaseDate?.slice(0, 4) || '—'}
                           </ThemedText>
-                          <View style={[styles.ratingBadge, { backgroundColor: theme.accentSoft }]}>
-                            <ThemedText style={[styles.ratingText, { color: theme.accent }]}>
+                          <View style={[styles.ratingBadge, { backgroundColor: ratingBg(movie.voteAverage) }]}>
+                            <ThemedText style={[styles.ratingText, { color: ratingColor(movie.voteAverage) }]}>
                               {movie.voteAverage.toFixed(1)}
                             </ThemedText>
                           </View>
@@ -795,8 +864,8 @@ export default function HomeScreen() {
                           <ThemedText style={[styles.posterYear, { color: theme.textMuted }]}>
                             {movie.releaseDate?.slice(0, 4) || '—'}
                           </ThemedText>
-                          <View style={[styles.ratingBadge, { backgroundColor: theme.accentSoft }]}>
-                            <ThemedText style={[styles.ratingText, { color: theme.accent }]}>
+                          <View style={[styles.ratingBadge, { backgroundColor: ratingBg(movie.voteAverage) }]}>
+                            <ThemedText style={[styles.ratingText, { color: ratingColor(movie.voteAverage) }]}>
                               {movie.voteAverage.toFixed(1)}
                             </ThemedText>
                           </View>
@@ -1009,6 +1078,38 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: -2,
   },
+  movieSearchWrapper: {
+    position: 'relative',
+  },
+  searchDropdown: {
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  searchDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    gap: 10,
+    borderBottomWidth: 1,
+  },
+  searchDropdownPoster: {
+    width: 36,
+    height: 54,
+    borderRadius: 4,
+  },
+  searchDropdownInfo: {
+    flex: 1,
+  },
+  searchDropdownTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  searchDropdownYear: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   chipContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1039,7 +1140,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   posterCard: {
-    flexBasis: '18%',
+    flexBasis: '23%',
     borderRadius: 10,
     borderWidth: 1,
     overflow: 'hidden',
@@ -1274,5 +1375,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     minWidth: 120,
     alignItems: 'center',
+  },
+  ratingPickerContainer: {
+    flex: 1,
+    gap: 8,
+  },
+  ratingPickerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  ratingPickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  ratingPickerChip: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ratingPickerChipText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

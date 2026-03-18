@@ -251,7 +251,7 @@ async function fetchPage(
  */
 export async function getMoodRecommendations(
   moodText: string,
-  limit = 10
+  limit = 8
 ): Promise<MoodSearchResult> {
   const rawFilters = await callOpenAI(moodText);
   const explanation = rawFilters.explanation || "Based on your mood";

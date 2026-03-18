@@ -13,6 +13,7 @@ export interface WatchedMovie {
   rating: number;        // 1-10
   watchedAt: string;     // ISO date
   genres: number[];      // TMDB genre IDs
+  posterPath?: string | null;
 }
 
 export interface UserPreferences {
@@ -371,4 +372,66 @@ export async function removeFromWatchlist(movieId: number): Promise<void> {
 export async function isInWatchlist(movieId: number): Promise<boolean> {
   const list = await readWatchlistFromStorage();
   return list.some((e) => e.movieId === movieId);
+}
+
+// ── Onboarding ────────────────────────────────────────────────────────────
+
+const ONBOARDING_KEY = "flickpix_onboarded";
+const USER_NAME_KEY = "flickpix_user_name";
+
+async function readFromStorage(key: string): Promise<string | null> {
+  if (isNodeRuntime()) return null;
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage.getItem(key);
+  }
+  const asyncStorage = await getAsyncStorage();
+  if (!asyncStorage) return null;
+  return asyncStorage.getItem(key);
+}
+
+async function writeToStorage(key: string, value: string): Promise<void> {
+  if (isNodeRuntime()) return;
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.setItem(key, value);
+    return;
+  }
+  const asyncStorage = await getAsyncStorage();
+  if (asyncStorage) await asyncStorage.setItem(key, value);
+}
+
+export async function hasCompletedOnboarding(): Promise<boolean> {
+  const val = await readFromStorage(ONBOARDING_KEY);
+  return val === "true";
+}
+
+/**
+ * Synchronous version for web (localStorage). Returns false on native (use async version).
+ */
+export function hasCompletedOnboardingSync(): boolean {
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage.getItem(ONBOARDING_KEY) === "true";
+  }
+  return false;
+}
+
+export async function getUserName(): Promise<string> {
+  const val = await readFromStorage(USER_NAME_KEY);
+  return val ?? "You";
+}
+
+/**
+ * Finalize onboarding: save user's name and favorite movies as their initial profile.
+ */
+export async function completeOnboarding(name: string, favoriteMovies: WatchedMovie[]): Promise<void> {
+  await writeToStorage(USER_NAME_KEY, name.trim() || "You");
+
+  const genres = Array.from(new Set(favoriteMovies.flatMap((m) => m.genres)));
+  const profile: UserProfile = {
+    preferences: { favoriteGenres: genres },
+    watchHistory: favoriteMovies,
+  };
+  _cachedProfile = profile;
+  await writeToPersistentStorage(profile);
+
+  await writeToStorage(ONBOARDING_KEY, "true");
 }

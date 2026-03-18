@@ -1,14 +1,15 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { setApiKey } from '@/services/tmdb';
 import { setOpenAIKey } from '@/services/moodSearch';
+import { hasCompletedOnboardingSync, hasCompletedOnboarding } from '@/services/storage';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -16,6 +17,9 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Synchronous check for web (localStorage); async fallback for native
+  const [onboarded, setOnboarded] = useState(() => hasCompletedOnboardingSync());
 
   const darkNavigationTheme = {
     ...DarkTheme,
@@ -45,14 +49,19 @@ export default function RootLayout() {
     if (openaiKey) {
       setOpenAIKey(openaiKey);
     }
+
+    // Async check for native (AsyncStorage)
+    hasCompletedOnboarding().then(setOnboarded);
   }, []);
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? darkNavigationTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
+      {!onboarded && <Redirect href="/onboarding" />}
       <StatusBar style="light" />
     </ThemeProvider>
   );

@@ -100,12 +100,15 @@ export function setApiKey(key: string) {
 }
 
 function getApiKey(): string {
-  if (!_apiKey) {
-    throw new Error(
-      "TMDB API key not set. Call setApiKey() or pass it to the test script."
-    );
+  if (_apiKey) return _apiKey;
+  const envKey = typeof process !== "undefined" ? process.env.EXPO_PUBLIC_TMDB_API_KEY : undefined;
+  if (envKey) {
+    _apiKey = envKey;
+    return _apiKey;
   }
-  return _apiKey;
+  throw new Error(
+    "TMDB API key not set. Call setApiKey() or pass it to the test script."
+  );
 }
 
 async function tmdbFetch<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
